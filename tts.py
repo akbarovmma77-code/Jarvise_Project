@@ -1,45 +1,62 @@
 import torch
 import sounddevice as sd
 import time
-import os
 
-# --- ИНИЦИАЛИЗАЦИЯ НЕЙРО-ГОЛОСА (Silero) ---
-language = 'ru'
-model_id = 'v4_ru'
-device = torch.device('cpu') # Твой i5-13400 справится мгновенно
+# ──────────────────────────────────────────────
+# ИНИЦИАЛИЗАЦИЯ МОДЕЛИ (один раз при старте)
+# ──────────────────────────────────────────────
 
-# Загружаем модель один раз при старте
-model, _ = torch.hub.load(repo_or_dir='snakers4/silero-models',
-                          model='silero_tts',
-                          language=language,
-                          speaker=model_id)
-model.to(device)
+print("--- TTS: загрузка голосовой модели Silero... ---")
+try:
+    model, _ = torch.hub.load(
+        repo_or_dir='snakers4/silero-models',
+        model='silero_tts',
+        language='ru',
+        speaker='v4_ru',
+    )
+    model.to(torch.device('cpu'))
+    print("--- TTS: модель загружена успешно! ---")
+except Exception as e:
+    print(f"--- TTS ОШИБКА: {e}")
+    model = None
 
-def va_speak(text):
-    # 1. Очистка текста от символов разметки нейросети
+# ──────────────────────────────────────────────
+# ОЗВУЧКА
+# ──────────────────────────────────────────────
+
+def va_speak(text: str):
+    if model is None:
+        print("TTS: модель не загружена, озвучка недоступна.")
+        return
+
+    # Очищаем текст от символов разметки
     clean_text = text.replace("*", "").replace("#", "").strip()
-    
+    if not clean_text:
+        return
+
     print(f"Ванесса: {clean_text}")
-    
-    # 2. Настройки голоса
-    speaker = 'xenia' # Элегантный женский голос
-    sample_rate = 48000
-    
+
     try:
-        # Генерируем аудио волну прямо в память
-        audio = model.apply_tts(text=clean_text,
-                                speaker=speaker,
-                                sample_rate=sample_rate)
-        
-        # 3. Воспроизводим через динамики HP Victus
-        sd.play(audio, sample_rate)
-        # Ждем завершения фразы, чтобы звук не обрывался
-        time.sleep(len(audio) / sample_rate + 0.3)
+        # Генерируем аудио — apply_tts возвращает PyTorch тензор
+        audio_tensor = model.apply_tts(
+            text=clean_text,
+            speaker='xenia',
+            sample_rate=48000,
+        )
+
+        # ── ИСПРАВЛЕНИЕ 1 ──────────────────────────────────────────────
+        # Конвертируем тензор в numpy — без этого sd.play() не воспроизводит звук
+        audio_numpy = audio_tensor.numpy()
+
+        # Останавливаем предыдущее воспроизведение если оно ещё идёт
         sd.stop()
-        
+
+        # ── ИСПРАВЛЕНИЕ 2 ──────────────────────────────────────────────
+        # sd.wait() надёжнее time.sleep() — ждёт именно до конца аудио,
+        # не зависит от длины фразы и не обрывает звук раньше времени
+        sd.play(audio_numpy, samplerate=48000)
+        sd.wait()
+
     except Exception as e:
         print(f"Ошибка нейро-голоса: {e}")
 
-# Исправленная строка запуска
-if __name__ == "__main__":
-    va_speak("Тест нейронной системы пройден, сэр. Теперь мой голос звучит намного естественнее.")
